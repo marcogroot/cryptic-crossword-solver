@@ -1,46 +1,61 @@
 use itertools::Itertools;
+use std::collections::HashSet;
 
 fn main() {
     let clue = "wet items on ground".to_lowercase();
     let clue_arr: Vec<String> = clue.split(" ").map(|f| f.to_string()).collect();
 
-    let solver = Solver::new(clue_arr, 7);
+    let dictionary = Dictionary::new();
+    let mut solver = Solver::new(clue_arr, 7);
+    let answers = solver.solve(&dictionary);
+
+    for answer in answers {
+        println!("{:?}", answer);
+    }
 }
 
-fn is_anagram_indicator(word: &str) -> bool {
-    let anagram_indicators = vec!["ground"];
-    anagram_indicators.contains(&word)
+#[derive(Debug)]
+#[allow(dead_code)]
+struct ValidAnswer {
+    answer: String,
+    confidence: f64,
 }
 
-fn generate_valid_anagrams(letters: Vec<char>) -> Vec<String> {
-    vec![]
+struct Dictionary {
+    words: HashSet<String>,
 }
 
-fn get_dictionary_definition(word: &str) -> Vec<String> {
-    vec![]
+impl Dictionary {
+    fn new() -> Self {
+        let words: HashSet<String> = include_str!("../words.txt")
+            .lines()
+            .map(|l| l.to_lowercase())
+            .collect();
+
+        Dictionary { words }
+    }
+
+    fn contains(&self, word: &str) -> bool {
+        return self.words.contains(word);
+    }
 }
 
+#[derive(Debug)]
 enum IndicatorType {
     Anagram,
 }
 
-fn get_indicator_types(word: &str) -> Vec<IndicatorType> {
+fn get_indicator_types(_word: &str) -> Vec<IndicatorType> {
     return vec![IndicatorType::Anagram];
 }
 
-fn is_past_tense(word: &str) -> bool {
+fn is_past_tense(_word: &str) -> bool {
     true
 }
 
-struct PotentialAnswer {
-    answer: String,
-    confidence: u8,
-}
-
 struct Solver {
-    hint: Vec<String>,
-    number_of_letters: u8,
-    potential_answers: Vec<PotentialAnswer>,
+    clue: Vec<String>,
+    number_of_letters: usize,
 }
 
 enum Position {
@@ -48,74 +63,177 @@ enum Position {
 }
 
 impl Solver {
-    fn new(hint: Vec<String>, number_of_letters: u8) -> Self {
+    fn new(hint: Vec<String>, number_of_letters: usize) -> Self {
         Solver {
-            hint,
+            clue: hint,
             number_of_letters,
-            potential_answers: vec![],
         }
     }
 
-    fn recursive_solve(
-        &mut self,
-        indicator: Option<IndicatorType>,
-        position: Position,
-        fodder: Vec<String>,
-        current_index: usize,
-        mut current_answer: Vec<char>,
-    ) {
-        if current_index == self.hint.len() {
-            println!("Reached the end of the word");
-            let answer: String = current_answer.iter().collect();
-            println!("Answer is {answer}");
-            if current_answer.contains(&'?') {
-                println!("Invalid answer, not enough letters");
-                return;
-            }
-            println!("Valid answer!");
-            let potential_answer = PotentialAnswer {
-                answer,
-                confidence: 100,
-            };
-            &self.potential_answers.push(potential_answer);
+    fn solve(&mut self, dictionary: &Dictionary) -> Vec<ValidAnswer> {
+        let mut answers = vec![];
 
+        // TODO: I am assuming that the definition is either the first or last word... fix this
+
+        // definition is first word case
+        let clue_len = &self.clue.len();
+        let definition = &self
+            .clue
+            .first()
+            .expect("There should be atleast one word in the clue");
+
+        let word_play = &self.clue[1..].to_vec();
+
+        recursive_solve(
+            word_play,
+            definition,
+            self.number_of_letters,
+            None,
+            Position::Continue,
+            vec![],
+            0,
+            vec![],
+            &mut answers,
+            dictionary,
+        );
+
+        let definition = &self
+            .clue
+            .last()
+            .expect("There should be atleast one word in the clue");
+
+        let word_play = &self.clue[..clue_len - 1].to_vec();
+
+        recursive_solve(
+            word_play,
+            definition,
+            self.number_of_letters,
+            None,
+            Position::Continue,
+            vec![],
+            0,
+            vec![],
+            &mut answers,
+            dictionary,
+        );
+
+        let python_args: String = answers
+            .iter()
+            .map(|a| format!("{},{};", a.definition, a.answer))
+            .collect();
+
+        let output = std::process::Command::new("python3")
+            .args(["similarity.py", &python_args])
+            .output();
+
+        let scores: Vec<f64> = match output {
+            Ok(res) => {
+                let text = String::from_utf8_lossy(&res.stdout);
+                text.lines()
+                    .map(|line| line.trim().parse().unwrap())
+                    .collect()
+            }
+            Err(e) => {
+                panic!("Womp womp {e}");
+            }
+        };
+
+        let filter_cutoff = 0.7;
+        let valid_answers = answers
+            .iter()
+            .zip(scores)
+            .filter(|it| it.1 >= filter_cutoff)
+            .map(|f| ValidAnswer {
+                answer: f.0.answer.to_string(),
+                confidence: f.1,
+            })
+            .collect();
+
+        valid_answers
+    }
+}
+
+#[derive(Debug)]
+struct PotentialAnswer {
+    definition: String,
+    answer: String,
+}
+
+fn recursive_solve(
+    word_play: &Vec<String>,
+    definition: &str,
+    answer_length: usize,
+    _indicator: Option<IndicatorType>,
+    position: Position,
+    fodder: Vec<String>,
+    current_index: usize,
+    current_answer: Vec<char>,
+    answers: &mut Vec<PotentialAnswer>,
+    dictionary: &Dictionary,
+) {
+    if current_index == word_play.len() {
+        let answer: String = current_answer.iter().collect();
+        if current_answer.len() != answer_length {
             return;
         }
+        let potential_answer = PotentialAnswer {
+            definition: definition.to_string(),
+            answer,
+        };
+        answers.push(potential_answer);
 
-        let word = &self.hint[current_index].clone();
-        let next_index = current_index + 1;
-        println!("Current word {word}");
+        return;
+    }
 
-        // always try the path where this is not an indicator, and is fodder
-        let mut new_fodder = fodder.clone();
-        new_fodder.push(word.clone());
-        self.recursive_solve(None, position, new_fodder, next_index, current_answer);
+    let word = &word_play[current_index].clone();
+    let next_index = current_index + 1;
 
-        let indicators = get_indicator_types(word);
-        let past_tense = is_past_tense(word);
-        for indicator_type in indicators {
-            match indicator_type {
-                IndicatorType::Anagram => {
-                    if past_tense {
-                        let mut letters: Vec<char> = vec![];
-                        fodder.iter().for_each(|f| {
-                            f.chars().for_each(|c| letters.push(c));
-                        });
-                        let anagrams = get_anagrams(letters);
-                        for anagram in anagrams {
-                            let updated_answer =
-                                updated_answer(&current_answer, &letters, &position);
-                            self.recursive_solve(
-                                None,
-                                position,
-                                new_fodder,
-                                next_index,
-                                updated_answer,
-                            );
-                        }
-                    } else {
-                        println!("todo: implement future indicator flow")
+    // always try the path where this is not an indicator, and is fodder
+    let mut new_fodder = fodder.clone();
+    new_fodder.push(word.clone());
+    recursive_solve(
+        word_play,
+        definition,
+        answer_length,
+        None,
+        Position::Continue,
+        new_fodder,
+        next_index,
+        current_answer.clone(),
+        answers,
+        dictionary,
+    );
+
+    let indicators = get_indicator_types(word);
+    let past_tense = is_past_tense(word);
+    for indicator_type in indicators {
+        match indicator_type {
+            IndicatorType::Anagram => {
+                if past_tense {
+                    let mut letters: Vec<char> = vec![];
+                    fodder.iter().for_each(|f| {
+                        f.chars().for_each(|c| letters.push(c));
+                    });
+                    let anagrams = get_anagrams(dictionary, letters);
+                    for anagram in anagrams {
+                        let letters: Vec<char> = anagram.chars().into_iter().collect();
+                        let updated_answer = updated_answer(&current_answer, &letters, &position);
+
+                        recursive_solve(
+                            word_play,
+                            definition,
+                            answer_length,
+                            None,
+                            Position::Continue,
+                            vec![],
+                            next_index,
+                            updated_answer,
+                            answers,
+                            dictionary,
+                        );
                     }
+                } else {
+                    println!("todo: implement future indicator flow")
                 }
             }
         }
@@ -127,41 +245,26 @@ fn updated_answer(
     letters: &Vec<char>,
     position: &Position,
 ) -> Vec<char> {
-    let mut new_answer = current_answer.clone();
     match position {
         Position::Continue => {
-            let start_index = current_answer.iter().position(|c| *c == '?');
-            let a: String = current_answer.iter().collect();
-            let b: String = letters.iter().collect();
-            match start_index {
-                Some(s) => {
-                    for (i, letter) in letters.iter().enumerate() {
-                        new_answer[s + i] = *letter;
-                    }
-                    return new_answer;
-                }
-                None => {
-                    panic!("Could not fit {a} into {b}");
-                }
+            let mut updated_answer = current_answer.clone();
+            for letter in letters {
+                updated_answer.push(*letter);
             }
+            return updated_answer;
         }
     }
 }
 
-fn is_dictionary_word(word: &str) -> bool {
-    webster::dictionary(word).is_some()
-}
-
-fn get_anagrams(letters: Vec<char>) -> Vec<String> {
+fn get_anagrams(dictionary: &Dictionary, letters: Vec<char>) -> Vec<String> {
     let anagrams = letters
         .iter()
         .permutations(letters.len())
+        .unique()
         .filter_map(|perm| {
             let word: String = perm.into_iter().collect();
-            is_dictionary_word(&word).then(|| {
-                println!("Anagram: {word}");
-                word
-            })
+            let res = dictionary.contains(&word);
+            res.then(|| word)
         })
         .collect();
     anagrams
