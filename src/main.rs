@@ -1,3 +1,4 @@
+mod test;
 use itertools::Itertools;
 use std::collections::HashSet;
 
