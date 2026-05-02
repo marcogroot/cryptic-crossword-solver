@@ -2,10 +2,11 @@ use itertools::Itertools;
 use std::collections::HashSet;
 use std::rc::Rc;
 
+#[derive(Clone)]
 struct Node {
     indicator: Indicator,
     value: String,
-    parent: Rc<Node>,
+    parent: Option<Rc<Node>>,
 }
 
 struct RootNode {
@@ -13,7 +14,7 @@ struct RootNode {
     root: Node,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Copy)]
 enum Indicator {
     Anagram,
     Reverse,
@@ -21,16 +22,44 @@ enum Indicator {
     Fodder,
 }
 
+fn recursive_parse_node(node: Option<Rc<Node>>, result: &mut Vec<Rc<Node>>) {
+    match node {
+        Some(node) => {
+            result.push(node.clone());
+            recursive_parse_node(node.parent.clone(), result)
+        }
+        None => {
+            println!("Collected {} results", result.len());
+            return;
+        }
+    }
+}
+
+fn parse_leaf_node(leaf_node: Rc<Node>) {
+    let mut res = vec![];
+    recursive_parse_node(Some(leaf_node), &mut res);
+    res.iter().rev().for_each(|node| {
+        println!("{}, {:?}", node.value, node.indicator);
+    });
+}
+
 fn recursive_solve(
     word_play: &Vec<String>,
     root_node: &RootNode,
     current_index: usize,
-    previous_node: Rc<Node>,
+    previous_node: Option<Rc<Node>>,
     leaf_nodes: &mut Vec<Rc<Node>>,
     dictionary: &Dictionary,
 ) {
     if current_index == word_play.len() {
-        leaf_nodes.push(previous_node);
+        match previous_node {
+            Some(node) => {
+                leaf_nodes.push(node);
+            }
+            None => {
+                panic!("Previous node is missing");
+            }
+        }
         return;
     }
 
@@ -38,11 +67,11 @@ fn recursive_solve(
     let next_index = current_index + 1;
 
     if dictionary.is_anagram_indicator(word) {
-        let anagram_node = Rc::new(Node {
+        let anagram_node = Some(Rc::new(Node {
             indicator: Indicator::Anagram,
             value: word.clone(),
             parent: previous_node.clone(),
-        });
+        }));
         recursive_solve(
             word_play,
             root_node,
@@ -53,11 +82,11 @@ fn recursive_solve(
         );
     }
 
-    let fodder_node = Rc::new(Node {
+    let fodder_node = Some(Rc::new(Node {
         indicator: Indicator::Fodder,
         value: word.clone(),
         parent: previous_node.clone(),
-    });
+    }));
 
     recursive_solve(
         word_play,
